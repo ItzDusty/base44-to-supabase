@@ -4,6 +4,7 @@ export * from './convert.js';
 export * from './initSupabase.js';
 export * from './importScan.js';
 export * from './verify.js';
+export * from './cleanup.js';
 export * from './io.js';
 export * from './run.js';
 export * from './consoleSummary.js';

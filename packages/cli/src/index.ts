@@ -9,7 +9,13 @@ import { promisify } from 'node:util';
 
 import { Command } from 'commander';
 
-import { runAnalyze, runConvert, runInitSupabase, runVerify } from '@base44-to-supabase/codemods';
+import {
+  runAnalyze,
+  runCleanup,
+  runConvert,
+  runInitSupabase,
+  runVerify,
+} from '@base44-to-supabase/codemods';
 
 function resolveTargetPath(p: string): string {
   return path.resolve(process.cwd(), p);
@@ -292,6 +298,36 @@ async function main() {
     });
 
   program
+    .command('cleanup')
+    .argument('<path>', 'Path to the project to clean up')
+    .option('--delete', 'Actually delete files (default is dry-run)', false)
+    .description(
+      'Optionally delete obvious Base44-only artifacts (e.g. .base44/ or base44Client-like files) in a conservative, reference-aware way.',
+    )
+    .action(async (targetPath: string, cmd: any) => {
+      const abs = resolveTargetPath(targetPath);
+      const mode = cmd?.delete ? 'delete' : 'dry-run';
+      const { reportPath, result } = await runCleanup(abs, { mode });
+      console.log(`Mode: ${mode}`);
+      console.log(`Deleted: ${result.deletedPaths.length}`);
+      console.log(`Skipped: ${result.skippedPaths.length}`);
+      if (result.deletedPaths.length) {
+        console.log('');
+        console.log('Deleted paths (first 50):');
+        for (const p of result.deletedPaths.slice(0, 50)) console.log(`- ${p}`);
+        if (result.deletedPaths.length > 50) console.log('- ...');
+      }
+      if (result.skippedPaths.length) {
+        console.log('');
+        console.log('Skipped paths (first 20):');
+        for (const s of result.skippedPaths.slice(0, 20)) console.log(`- ${s.path}: ${s.reason}`);
+        if (result.skippedPaths.length > 20) console.log('- ...');
+      }
+      console.log('');
+      console.log(`Wrote report: ${reportPath}`);
+    });
+
+  program
     .command('start')
     .argument('<source>', 'Path to a repo folder OR a git URL')
     .option('--out <path>', 'Output folder for the migrated copy')
@@ -441,6 +477,21 @@ async function main() {
             generateEdgeFunctions,
             functionsDir,
           });
+        }
+
+        const shouldCleanup = await promptConfirm(
+          rl,
+          'Delete obvious Base44-only artifacts in the migrated copy (conservative cleanup)?',
+          { defaultValue: false },
+        );
+        if (shouldCleanup) {
+          console.log('');
+          console.log('Cleaning up Base44 artifacts...');
+          const { result } = await runCleanup(chosenOut, { mode: 'delete' });
+          console.log(`Deleted: ${result.deletedPaths.length} path(s)`);
+          if (result.skippedPaths.length) {
+            console.log(`Skipped: ${result.skippedPaths.length} path(s) (still referenced)`);
+          }
         }
 
         console.log('');

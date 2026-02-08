@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { analyzeProject } from './analyze.js';
+import { cleanupProject } from './cleanup.js';
 import { convertProject } from './convert.js';
 import { initSupabaseProject } from './initSupabase.js';
 import { verifyProject } from './verify.js';
@@ -19,6 +20,10 @@ export type RunInitSupabaseOptions = {
   includeUpdatedAt?: boolean;
   generateEdgeFunctions?: boolean;
   functionsDir?: string;
+};
+
+export type RunCleanupOptions = {
+  mode?: 'dry-run' | 'delete';
 };
 
 export async function runAnalyze(
@@ -70,6 +75,25 @@ export async function runInitSupabase(
   });
   const reportPath = await writeReport(abs, updated);
   return { report: updated, reportPath };
+}
+
+export async function runCleanup(
+  rootPath: string,
+  options?: RunCleanupOptions,
+): Promise<{
+  report: Base44ToSupabaseReport;
+  reportPath: string;
+  result: { deletedPaths: string[]; skippedPaths: Array<{ path: string; reason: string }> };
+}> {
+  const abs = path.resolve(rootPath);
+  const existing = (await readReport(abs)) ?? (await analyzeProject({ rootPath: abs }));
+  const { report: updated, result } = await cleanupProject({
+    rootPath: abs,
+    report: existing,
+    mode: options?.mode ?? 'dry-run',
+  });
+  const reportPath = await writeReport(abs, updated);
+  return { report: updated, reportPath, result };
 }
 
 export async function runVerify(rootPath: string): Promise<{

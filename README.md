@@ -165,9 +165,10 @@ If you need server-only administrative operations, do them in server-side code (
 
 The adapter is intentionally small and opinionated:
 
-- `auth`: `signIn`, `signOut`, `getUser`
-- `data`: `create`, `read`, `update`, `delete`
-- `storage`: `upload`, `download`
+- `auth`: `signIn`, `signUp`, `signOut`, `getUser`, `getSession`, `onAuthStateChange`, password reset/update helpers
+- `data`: `create`, `read` (supports `select`, ordering, and richer filters), `upsert`, `update`, `delete`
+- `storage`: `upload`, `download`, `remove`, `list`, `createSignedUrl`, `getPublicUrl`
+- `rpc`: `call` (Supabase RPC/functions)
 
 If your app uses additional capabilities (realtime, RPC, edge functions), expect to extend the adapter and update the conversion TODOs accordingly.
 

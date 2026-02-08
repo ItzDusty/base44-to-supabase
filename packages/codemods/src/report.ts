@@ -59,6 +59,11 @@ export type Base44ToSupabaseReport = {
     seedGenerated?: string;
     edgeFunctionsGenerated?: string[];
   };
+  cleanup?: {
+    mode: 'dry-run' | 'delete';
+    deletedPaths: string[];
+    skippedPaths: Array<{ path: string; reason: string }>;
+  };
 };
 
 export function createEmptyReport(rootPath: string): Base44ToSupabaseReport {

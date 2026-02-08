@@ -41,6 +41,8 @@ export default [
       '**/dist/**',
       '**/.turbo/**',
       '**/node_modules/**',
+      '**/migrated-*/**',
+      '**/migrated-repo-*/**',
       'eslint.config.js',
       'prettier.config.js',
     ],
