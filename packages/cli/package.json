@@ -1,0 +1,24 @@
+{
+  "name": "@base44-to-supabase/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "base44-to-supabase": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@base44-to-supabase/codemods": "workspace:*",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.10",
+    "typescript": "^5.7.3"
+  }
+}

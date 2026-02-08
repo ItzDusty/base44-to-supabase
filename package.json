@@ -1,0 +1,27 @@
+{
+  "name": "base44-to-supabase",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Migration and portability tooling to help Base44-based apps adopt Supabase (cloud or local) via a vendor-neutral adapter layer.",
+  "packageManager": "pnpm@9.15.4",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "eslint .",
+    "format": "prettier . --check",
+    "format:write": "prettier . --write",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.10",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0",
+    "vitest": "^2.1.8"
+  }
+}
