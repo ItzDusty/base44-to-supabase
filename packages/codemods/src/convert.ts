@@ -168,7 +168,17 @@ function rewriteAuthCalls(sf: SourceFile, bindings: Base44Bindings): number {
     if (!isAuthReceiver(pae.getExpression(), bindings)) continue;
 
     const method = pae.getName();
-    if (method !== 'signIn' && method !== 'signOut' && method !== 'getUser') continue;
+    if (
+      method !== 'signIn' &&
+      method !== 'signUp' &&
+      method !== 'signOut' &&
+      method !== 'getUser' &&
+      method !== 'getSession' &&
+      method !== 'resetPasswordForEmail' &&
+      method !== 'updatePassword' &&
+      method !== 'onAuthStateChange'
+    )
+      continue;
 
     call.replaceWithText(
       `backend.auth.${method}(${call
@@ -196,7 +206,14 @@ function rewriteStorageCalls(
     if (!isStorageReceiver(pae.getExpression(), bindings)) continue;
 
     const method = pae.getName();
-    if (method === 'upload' || method === 'download') {
+    if (
+      method === 'upload' ||
+      method === 'download' ||
+      method === 'remove' ||
+      method === 'list' ||
+      method === 'createSignedUrl' ||
+      method === 'getPublicUrl'
+    ) {
       call.replaceWithText(
         `backend.storage.${method}(${call
           .getArguments()
@@ -251,6 +268,16 @@ function rewriteCollectionsCrud(
         continue;
       }
       call.replaceWithText(`backend.data.create(${entityText}, ${args[0]})`);
+      rewritten++;
+      continue;
+    }
+
+    if (method === 'upsert' || method === 'createOrUpdate') {
+      if (args.length < 1) {
+        unknown++;
+        continue;
+      }
+      call.replaceWithText(`backend.data.upsert(${entityText}, ${args[0]})`);
       rewritten++;
       continue;
     }

@@ -7,16 +7,23 @@ import { findProjectSourceFiles, toPosixPath } from './fs.js';
 import { findImportedModuleSpecifiers } from './importScan.js';
 import { isLikelyBase44ImportSource } from './sdkHeuristics.js';
 import type { Base44ToSupabaseReport } from './report.js';
+import { verifyProject } from './verify.js';
 
 export type CleanupOptions = {
   rootPath: string;
   report: Base44ToSupabaseReport;
   mode?: 'dry-run' | 'delete';
+  removeDependencies?: boolean;
+  removeBase44FunctionsDir?: boolean;
+  aggressive?: boolean;
+  quarantineDir?: string;
 };
 
 export type CleanupResult = {
   deletedPaths: string[];
+  quarantinedPaths: string[];
   skippedPaths: Array<{ path: string; reason: string }>;
+  removedDependencies: string[];
 };
 
 function rel(rootPath: string, abs: string): string {
@@ -35,6 +42,42 @@ async function exists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function listBase44ModuleReferencesInDir(dirAbs: string): Promise<boolean> {
+  const abs = await fg(['**/*.{ts,tsx,js,jsx}', '!**/node_modules/**', '!**/dist/**'], {
+    cwd: dirAbs,
+    absolute: true,
+    onlyFiles: true,
+    dot: true,
+    followSymbolicLinks: false,
+  });
+  for (const f of abs) {
+    const text = await fs.readFile(f, 'utf8');
+    const specifiers = findImportedModuleSpecifiers(text);
+    if (specifiers.some((s) => isLikelyBase44ImportSource(s))) return true;
+  }
+  return false;
+}
+
+function removeMatchingDeps(
+  pkg: any,
+  predicate: (name: string) => boolean,
+): { removed: string[]; updated: any } {
+  const removed: string[] = [];
+  const updated = { ...pkg };
+  const fields = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+  for (const field of fields) {
+    const obj = updated[field];
+    if (!obj || typeof obj !== 'object') continue;
+    for (const name of Object.keys(obj)) {
+      if (predicate(name)) {
+        removed.push(name);
+        delete obj[name];
+      }
+    }
+  }
+  return { removed: [...new Set(removed)].sort(), updated };
 }
 
 async function resolveRelativeImport(fromFileAbs: string, spec: string): Promise<string | null> {
@@ -90,16 +133,60 @@ function isBase44OnlyFile(text: string): boolean {
   return specifiers.some((s) => isLikelyBase44ImportSource(s));
 }
 
+async function moveToQuarantine(
+  rootPath: string,
+  fileAbs: string,
+  quarantineDirRel: string,
+): Promise<void> {
+  const relPath = rel(rootPath, fileAbs);
+  const targetAbs = path.join(rootPath, quarantineDirRel, relPath);
+  await fs.mkdir(path.dirname(targetAbs), { recursive: true });
+
+  try {
+    await fs.rename(fileAbs, targetAbs);
+  } catch {
+    await fs.copyFile(fileAbs, targetAbs);
+    await fs.rm(fileAbs, { force: true });
+  }
+}
+
 export async function cleanupProject(options: CleanupOptions): Promise<{
   report: Base44ToSupabaseReport;
   result: CleanupResult;
 }> {
   const mode = options.mode ?? 'dry-run';
+  const removeDependencies = options.removeDependencies ?? false;
+  const removeBase44FunctionsDir = options.removeBase44FunctionsDir ?? true;
+  const aggressive = options.aggressive ?? false;
+  const quarantineDirRel = options.quarantineDir ?? '.base44-to-supabase/removed';
 
   const deletedPaths: string[] = [];
+  const quarantinedPaths: string[] = [];
   const skippedPaths: Array<{ path: string; reason: string }> = [];
+  const removedDependencies: string[] = [];
 
   const importedBy = await buildImportReverseIndex(options.rootPath);
+
+  // Special-case: many Base44 projects have a top-level "functions/" directory.
+  // If it contains Base44 module imports, we can remove it to leave a cleaner migrated copy.
+  // This is opt-in via cleanup itself; it is conservative in that it requires Base44 imports.
+  const functionsDirAbs = path.join(options.rootPath, 'functions');
+  if (removeBase44FunctionsDir) {
+    try {
+      const st = await fs.stat(functionsDirAbs);
+      if (st.isDirectory()) {
+        const hasBase44Refs = await listBase44ModuleReferencesInDir(functionsDirAbs);
+        if (hasBase44Refs) {
+          if (mode === 'delete') {
+            await fs.rm(functionsDirAbs, { recursive: true, force: true });
+          }
+          deletedPaths.push(rel(options.rootPath, functionsDirAbs));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const patterns = [
     // top-level Base44 config/state (conservative)
@@ -177,17 +264,94 @@ export async function cleanupProject(options: CleanupOptions): Promise<{
     deletedPaths.push(rel(options.rootPath, abs));
   }
 
+  // Aggressive mode: quarantine any remaining source files that still import/require Base44.
+  // This intentionally prioritizes a Base44-free working tree over preserving builds.
+  if (aggressive) {
+    const sourceFilesAbs = await findProjectSourceFiles({ cwd: options.rootPath });
+    for (const abs of sourceFilesAbs) {
+      const text = await fs.readFile(abs, 'utf8');
+      const specs = findImportedModuleSpecifiers(text).filter(isLikelyBase44ImportSource);
+      if (specs.length === 0) continue;
+
+      const r = rel(options.rootPath, abs);
+      if (mode === 'delete') {
+        await moveToQuarantine(options.rootPath, abs, quarantineDirRel);
+        quarantinedPaths.push(r);
+        deletedPaths.push(r);
+      } else {
+        skippedPaths.push({
+          path: r,
+          reason: `Would quarantine (aggressive) because it references Base44 modules: ${specs
+            .map((s) => JSON.stringify(s))
+            .join(', ')}`,
+        });
+      }
+    }
+  }
+
   const updated: Base44ToSupabaseReport = {
     ...options.report,
     cleanup: {
       mode,
       deletedPaths,
+      quarantinedPaths: quarantinedPaths.length ? quarantinedPaths.sort() : undefined,
       skippedPaths,
+      removedDependencies,
     },
   };
 
+  // Optionally remove Base44-related deps from package.json, but only if the project
+  // has no remaining Base44 module references (to avoid breaking builds).
+  if (removeDependencies) {
+    const verify = await verifyProject({ rootPath: options.rootPath });
+    if (verify.remainingBase44ModuleReferences.length > 0) {
+      updated.cleanup = {
+        ...(updated.cleanup ?? { mode, deletedPaths, skippedPaths }),
+        removedDependencies,
+      };
+      updated.cleanup.skippedPaths = [
+        ...(updated.cleanup.skippedPaths ?? []),
+        {
+          path: 'package.json',
+          reason: `Not removing Base44 dependencies because ${verify.remainingBase44ModuleReferences.length} file(s) still reference Base44 modules. Run verify/convert first.`,
+        },
+      ];
+      return {
+        report: updated,
+        result: {
+          deletedPaths,
+          quarantinedPaths,
+          skippedPaths: updated.cleanup.skippedPaths,
+          removedDependencies,
+        },
+      };
+    }
+
+    const pkgPath = path.join(options.rootPath, 'package.json');
+    try {
+      const text = await fs.readFile(pkgPath, 'utf8');
+      const parsed = JSON.parse(text);
+      const { removed, updated: nextPkg } = removeMatchingDeps(parsed, (name) =>
+        name.toLowerCase().includes('base44'),
+      );
+      if (removed.length > 0) {
+        removedDependencies.push(...removed);
+        if (mode === 'delete') {
+          await fs.writeFile(pkgPath, JSON.stringify(nextPkg, null, 2) + '\n', 'utf8');
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return {
     report: updated,
-    result: { deletedPaths, skippedPaths },
+    result: {
+      deletedPaths,
+      quarantinedPaths,
+      skippedPaths,
+      removedDependencies: [...new Set(removedDependencies)].sort(),
+    },
   };
 }

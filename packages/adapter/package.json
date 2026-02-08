@@ -1,6 +1,22 @@
 {
   "name": "@base44-to-supabase/adapter",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "Vendor-neutral backend adapter interface for Base44 → Supabase migrations.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ItzDusty/base44-to-supabase.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ItzDusty/base44-to-supabase/issues"
+  },
+  "homepage": "https://github.com/ItzDusty/base44-to-supabase#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,7 +30,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepack": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^22.10.10",

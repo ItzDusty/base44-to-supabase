@@ -44,4 +44,73 @@ describe('cleanupProject', () => {
     expect(result.skippedPaths.some((s) => s.path.includes('src/api/base44Client.ts'))).toBe(true);
     await expect(fs.stat(path.join(rootPath, 'src/api/base44Client.ts'))).resolves.toBeTruthy();
   });
+
+  it('removes a top-level functions/ dir if it contains Base44 imports', async () => {
+    const rootPath = await makeTempProject({
+      'functions/hello.ts': "import { auth } from 'base44';\nexport default auth;\n",
+      'supabase/functions/hello/index.ts': "export default () => new Response('ok');\n",
+    });
+
+    const report = await analyzeProject({ rootPath });
+    const { result } = await cleanupProject({ rootPath, report, mode: 'delete' });
+
+    expect(result.deletedPaths.some((p) => p === 'functions')).toBe(true);
+    await expect(fs.stat(path.join(rootPath, 'functions'))).rejects.toBeTruthy();
+    await expect(
+      fs.stat(path.join(rootPath, 'supabase/functions/hello/index.ts')),
+    ).resolves.toBeTruthy();
+  });
+
+  it('can remove Base44 deps from package.json when no Base44 module refs remain', async () => {
+    const rootPath = await makeTempProject({
+      'src/app.ts': 'export const ok = true;\n',
+      'package.json': JSON.stringify(
+        {
+          name: 'x',
+          version: '0.0.0',
+          dependencies: { base44: '^1.0.0', react: '^18.0.0' },
+          devDependencies: { '@base44/sdk': '^1.0.0' },
+        },
+        null,
+        2,
+      ),
+    });
+
+    const report = await analyzeProject({ rootPath });
+    const { result } = await cleanupProject({
+      rootPath,
+      report,
+      mode: 'delete',
+      removeDependencies: true,
+    });
+
+    expect(result.removedDependencies).toContain('base44');
+    expect(result.removedDependencies).toContain('@base44/sdk');
+    const pkg = JSON.parse(await fs.readFile(path.join(rootPath, 'package.json'), 'utf8'));
+    expect(pkg.dependencies?.base44).toBeUndefined();
+    expect(pkg.devDependencies?.['@base44/sdk']).toBeUndefined();
+    expect(pkg.dependencies?.react).toBeTruthy();
+  });
+
+  it('aggressive mode quarantines any remaining Base44-referencing source files', async () => {
+    const rootPath = await makeTempProject({
+      'src/legacy.ts': "import { auth } from 'base44';\nexport const x = auth;\n",
+      'src/app.ts': 'export const ok = true;\n',
+    });
+
+    const report = await analyzeProject({ rootPath });
+    const { result } = await cleanupProject({
+      rootPath,
+      report,
+      mode: 'delete',
+      aggressive: true,
+      quarantineDir: '.base44-to-supabase/removed',
+    });
+
+    expect(result.quarantinedPaths.some((p) => p.includes('src/legacy.ts'))).toBe(true);
+    await expect(fs.stat(path.join(rootPath, 'src/legacy.ts'))).rejects.toBeTruthy();
+    await expect(
+      fs.stat(path.join(rootPath, '.base44-to-supabase/removed/src/legacy.ts')),
+    ).resolves.toBeTruthy();
+  });
 });

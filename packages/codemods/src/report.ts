@@ -62,7 +62,9 @@ export type Base44ToSupabaseReport = {
   cleanup?: {
     mode: 'dry-run' | 'delete';
     deletedPaths: string[];
+    quarantinedPaths?: string[];
     skippedPaths: Array<{ path: string; reason: string }>;
+    removedDependencies?: string[];
   };
 };
 

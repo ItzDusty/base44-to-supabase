@@ -182,6 +182,37 @@ async function writeDotEnvFile(targetDirAbs: string, env: Record<string, string>
   await fs.writeFile(outPath, lines.join('\n') + '\n', 'utf8');
 }
 
+function parseEnvPairs(pairs: string[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of pairs ?? []) {
+    const idx = raw.indexOf('=');
+    if (idx <= 0) continue;
+    const k = raw.slice(0, idx).trim();
+    const v = raw.slice(idx + 1);
+    if (!k) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function printVerifyResult(result: {
+  ok: boolean;
+  filesScanned: number;
+  remaining: Array<{ file: string; specifiers: string[] }>;
+}) {
+  if (result.ok) {
+    console.log(`PASS: Base44-free (scanned ${result.filesScanned} file(s)).`);
+    return;
+  }
+  console.log(
+    `FAIL: Found Base44 module references in ${result.remaining.length} file(s) (scanned ${result.filesScanned}).`,
+  );
+  for (const item of result.remaining.slice(0, 25)) {
+    console.log(`- ${item.file}: ${item.specifiers.join(', ')}`);
+  }
+  if (result.remaining.length > 25) console.log('- ...');
+}
+
 function printSupabaseNextSteps(rootPath: string) {
   const lines: string[] = [];
   lines.push('Next steps');
@@ -301,16 +332,43 @@ async function main() {
     .command('cleanup')
     .argument('<path>', 'Path to the project to clean up')
     .option('--delete', 'Actually delete files (default is dry-run)', false)
+    .option(
+      '--remove-deps',
+      'Also remove Base44 dependencies from package.json (requires no remaining Base44 imports)',
+      false,
+    )
+    .option(
+      '--aggressive',
+      'Quarantine any remaining Base44-referencing source files into .base44-to-supabase/removed (opt-in destructive behavior)',
+      false,
+    )
+    .option(
+      '--quarantine-dir <path>',
+      'Where to quarantine files in aggressive mode',
+      '.base44-to-supabase/removed',
+    )
     .description(
       'Optionally delete obvious Base44-only artifacts (e.g. .base44/ or base44Client-like files) in a conservative, reference-aware way.',
     )
     .action(async (targetPath: string, cmd: any) => {
       const abs = resolveTargetPath(targetPath);
       const mode = cmd?.delete ? 'delete' : 'dry-run';
-      const { reportPath, result } = await runCleanup(abs, { mode });
+      const { reportPath, result } = await runCleanup(abs, {
+        mode,
+        removeDependencies: Boolean(cmd?.removeDeps),
+        aggressive: Boolean(cmd?.aggressive),
+        quarantineDir: cmd?.quarantineDir,
+      });
       console.log(`Mode: ${mode}`);
       console.log(`Deleted: ${result.deletedPaths.length}`);
       console.log(`Skipped: ${result.skippedPaths.length}`);
+      if (result.quarantinedPaths.length) {
+        console.log(`Quarantined: ${result.quarantinedPaths.length}`);
+      }
+      if (result.removedDependencies.length) {
+        console.log(`Removed dependencies: ${result.removedDependencies.join(', ')}`);
+        console.log('Note: run your package manager install in the project to update lockfiles.');
+      }
       if (result.deletedPaths.length) {
         console.log('');
         console.log('Deleted paths (first 50):');
@@ -331,10 +389,58 @@ async function main() {
     .command('start')
     .argument('<source>', 'Path to a repo folder OR a git URL')
     .option('--out <path>', 'Output folder for the migrated copy')
+    .option(
+      '--ci',
+      'Non-interactive mode (use flags/defaults; sets exit code on verify failure)',
+      false,
+    )
+    .option(
+      '--backend-mode <mode>',
+      'Backend mode: supabase (cloud) or local (Supabase local)',
+      'supabase',
+    )
+    .option('--backend-entry <path>', 'Backend entry file path', 'src/backend/index.ts')
+    .option('--env-example <path>', 'Env example file path', '.env.example')
+    .option(
+      '--write-env',
+      'Write a .env file in the migrated copy (non-interactive requires --env)',
+      false,
+    )
+    .option(
+      '--env <pair>',
+      'Env var KEY=VALUE to write to .env (repeatable)',
+      (value: string, previous: string[]) => [...previous, value],
+      [],
+    )
+    .option('--no-init-supabase', 'Skip generating Supabase SQL assets')
+    .option('--owner-column <name>', 'Owner column name for generated RLS templates')
+    .option('--include-updated-at', 'Include updated_at columns in generated tables', false)
+    .option(
+      '--generate-edge-functions',
+      'Generate Edge Function stubs if server functions are inferred',
+      false,
+    )
+    .option('--functions-dir <path>', 'Edge functions output dir', 'supabase/functions')
+    .option('--cleanup', 'Run cleanup after conversion', false)
+    .option(
+      '--aggressive-cleanup',
+      'Aggressive cleanup (quarantine remaining Base44-referencing files)',
+      false,
+    )
+    .option(
+      '--quarantine-dir <path>',
+      'Quarantine directory for aggressive cleanup',
+      '.base44-to-supabase/removed',
+    )
+    .option(
+      '--remove-deps',
+      'Remove Base44 deps from package.json when safe (requires verify pass)',
+      false,
+    )
     .description(
       'Interactive migration flow: copy/clone a repo, analyze Base44 usage, prompt for choices, then convert and initialize Supabase assets.',
     )
-    .action(async (source: string, cmd: { out?: string }) => {
+    .action(async (source: string, cmd: any) => {
       const sourceAbs = resolveTargetPath(source);
       const sourceIsPath = await pathExists(sourceAbs);
 
@@ -342,165 +448,292 @@ async function main() {
         ? `${path.basename(sourceAbs)}-supabase`
         : `migrated-repo-supabase`;
 
-      const outAbs = await promptFlow(async (rl) => {
-        const chosenOut = cmd.out
-          ? resolveTargetPath(cmd.out)
-          : resolveTargetPath(
-              await promptInput(rl, 'Output folder', { defaultValue: defaultOutName }),
-            );
-        await ensureEmptyDir(chosenOut);
+      const outAbs = cmd?.ci
+        ? (async () => {
+            const chosenOut = cmd.out
+              ? resolveTargetPath(cmd.out)
+              : resolveTargetPath(defaultOutName);
+            await ensureEmptyDir(chosenOut);
 
-        console.log('');
-        console.log('Preparing working copy...');
-        if (sourceIsPath) {
-          await copyProjectDir(sourceAbs, chosenOut);
-        } else if (isProbablyGitUrl(source)) {
-          await cloneRepo(source, chosenOut);
-        } else {
-          throw new Error(
-            'Source was not found as a local path and does not look like a git URL. Provide a valid path or URL.',
-          );
-        }
+            console.log('');
+            console.log('Preparing working copy...');
+            if (sourceIsPath) {
+              await copyProjectDir(sourceAbs, chosenOut);
+            } else if (isProbablyGitUrl(source)) {
+              await cloneRepo(source, chosenOut);
+            } else {
+              throw new Error(
+                'Source was not found as a local path and does not look like a git URL. Provide a valid path or URL.',
+              );
+            }
 
-        console.log('');
-        console.log('Analyzing...');
-        const { summary, report } = await runAnalyze(chosenOut);
-        console.log(summary);
+            console.log('');
+            console.log('Analyzing...');
+            const { summary, report } = await runAnalyze(chosenOut);
+            console.log(summary);
 
-        console.log('');
-        const backendChoice = await promptSelect(
-          rl,
-          'Which backend target should the generated backend entry use?',
-          ['supabase (cloud)', 'local (Supabase local)'],
-          { defaultIndex: 0 },
-        );
-        const backendMode = backendChoice.startsWith('local') ? 'local' : 'supabase';
+            const backendMode = cmd?.backendMode === 'local' ? 'local' : 'supabase';
+            const backendEntryPath = cmd?.backendEntry ?? 'src/backend/index.ts';
+            const envExamplePath = cmd?.envExample ?? '.env.example';
 
-        const backendEntryPath = await promptInput(rl, 'Backend entry path', {
-          defaultValue: 'src/backend/index.ts',
-        });
-        const envExamplePath = await promptInput(rl, 'Env example path', {
-          defaultValue: '.env.example',
-        });
+            if (cmd?.writeEnv) {
+              const envPairs = parseEnvPairs(cmd?.env);
+              if (Object.keys(envPairs).length === 0) {
+                throw new Error('start --ci --write-env requires at least one --env KEY=VALUE');
+              }
+              await writeDotEnvFile(chosenOut, envPairs);
+              console.log('Wrote .env');
+            }
 
-        const shouldWriteEnv = await promptConfirm(
-          rl,
-          'Create a .env file in the migrated copy now?',
-          {
-            defaultValue: false,
-          },
-        );
+            const ownerColumn = cmd?.ownerColumn ? String(cmd.ownerColumn) : null;
+            const includeUpdatedAt = Boolean(cmd?.includeUpdatedAt);
 
-        if (shouldWriteEnv) {
-          const inferred = report.inferred.envVars ?? [];
-          const required = new Set<string>(inferred);
-          // Ensure Supabase vars are present since the generated backend entry reads them.
-          required.add('SUPABASE_URL');
-          required.add('SUPABASE_ANON_KEY');
-          if (backendMode === 'local') {
-            required.add('SUPABASE_LOCAL_URL');
-            required.add('SUPABASE_LOCAL_ANON_KEY');
-          }
+            const hasServerFunctions = (report.inferred.serverFunctions?.length ?? 0) > 0;
+            const generateEdgeFunctions = cmd?.generateEdgeFunctions
+              ? true
+              : hasServerFunctions
+                ? true
+                : false;
+            const functionsDir = generateEdgeFunctions
+              ? String(cmd?.functionsDir ?? 'supabase/functions')
+              : undefined;
 
-          const defaults: Record<string, string> = {};
-          if (backendMode === 'local') {
-            defaults.SUPABASE_LOCAL_URL = 'http://127.0.0.1:54321';
-            defaults.SUPABASE_URL = 'http://127.0.0.1:54321';
-          }
+            console.log('');
+            console.log('Converting...');
+            await runConvert(chosenOut, {
+              backendMode,
+              backendEntryPath,
+              envExamplePath,
+            });
 
-          const values = await promptEnvVars(rl, [...required].sort(), defaults);
-          await writeDotEnvFile(chosenOut, values);
-          console.log('Wrote .env');
-        }
+            console.log('');
+            const verifyAfterConvert = await runVerify(chosenOut);
+            printVerifyResult(verifyAfterConvert);
+            if (!verifyAfterConvert.ok) process.exitCode = 1;
 
-        console.log('');
-        const ownerColumnRaw = await promptInput(
-          rl,
-          'Optional owner column for RLS templates (leave blank for none)',
-          {
-            defaultValue: '',
-          },
-        );
-        const ownerColumn = ownerColumnRaw.trim() ? ownerColumnRaw.trim() : null;
-        const includeUpdatedAt = await promptConfirm(
-          rl,
-          'Include updated_at columns in generated tables?',
-          {
-            defaultValue: false,
-          },
-        );
+            if (cmd?.initSupabase !== false) {
+              console.log('');
+              console.log('Initializing Supabase assets...');
+              await runInitSupabase(chosenOut, {
+                ownerColumn,
+                includeUpdatedAt,
+                generateEdgeFunctions,
+                functionsDir,
+              });
+            }
 
-        const hasServerFunctions = (report.inferred.serverFunctions?.length ?? 0) > 0;
-        const generateEdgeFunctions = hasServerFunctions
-          ? await promptConfirm(
+            if (cmd?.cleanup) {
+              console.log('');
+              console.log('Cleaning up Base44 artifacts...');
+              const { result } = await runCleanup(chosenOut, {
+                mode: 'delete',
+                aggressive: Boolean(cmd?.aggressiveCleanup),
+                quarantineDir: cmd?.quarantineDir,
+                removeDependencies: Boolean(cmd?.removeDeps),
+              });
+              console.log(`Deleted: ${result.deletedPaths.length} path(s)`);
+              if (result.quarantinedPaths.length)
+                console.log(`Quarantined: ${result.quarantinedPaths.length} path(s)`);
+              if (result.removedDependencies.length) {
+                console.log(`Removed dependencies: ${result.removedDependencies.join(', ')}`);
+                console.log(
+                  'Note: run your package manager install in the project to update lockfiles.',
+                );
+              }
+            }
+
+            console.log('');
+            const verifyFinal = await runVerify(chosenOut);
+            printVerifyResult(verifyFinal);
+            if (!verifyFinal.ok) process.exitCode = 1;
+
+            console.log('');
+            console.log(`Done. Migrated copy at: ${chosenOut}`);
+            console.log('');
+            printSupabaseNextSteps(chosenOut);
+
+            return chosenOut;
+          })()
+        : await promptFlow(async (rl) => {
+            const chosenOut = cmd.out
+              ? resolveTargetPath(cmd.out)
+              : resolveTargetPath(
+                  await promptInput(rl, 'Output folder', { defaultValue: defaultOutName }),
+                );
+            await ensureEmptyDir(chosenOut);
+
+            console.log('');
+            console.log('Preparing working copy...');
+            if (sourceIsPath) {
+              await copyProjectDir(sourceAbs, chosenOut);
+            } else if (isProbablyGitUrl(source)) {
+              await cloneRepo(source, chosenOut);
+            } else {
+              throw new Error(
+                'Source was not found as a local path and does not look like a git URL. Provide a valid path or URL.',
+              );
+            }
+
+            console.log('');
+            console.log('Analyzing...');
+            const { summary, report } = await runAnalyze(chosenOut);
+            console.log(summary);
+
+            console.log('');
+            const backendChoice = await promptSelect(
               rl,
-              `Generate Supabase Edge Function stubs for inferred server functions (${report.inferred.serverFunctions.length})?`,
-              { defaultValue: true },
-            )
-          : false;
-        const functionsDir = generateEdgeFunctions
-          ? await promptInput(rl, 'Edge functions output dir', {
-              defaultValue: 'supabase/functions',
-            })
-          : undefined;
+              'Which backend target should the generated backend entry use?',
+              ['supabase (cloud)', 'local (Supabase local)'],
+              { defaultIndex: 0 },
+            );
+            const backendMode = backendChoice.startsWith('local') ? 'local' : 'supabase';
 
-        const shouldInit = await promptConfirm(
-          rl,
-          'Generate Supabase SQL (migrations + RLS templates) now?',
-          {
-            defaultValue: true,
-          },
-        );
+            const backendEntryPath = await promptInput(rl, 'Backend entry path', {
+              defaultValue: 'src/backend/index.ts',
+            });
+            const envExamplePath = await promptInput(rl, 'Env example path', {
+              defaultValue: '.env.example',
+            });
 
-        console.log('');
-        console.log('Converting...');
-        const { report: convertReport } = await runConvert(chosenOut, {
-          backendMode,
-          backendEntryPath,
-          envExamplePath,
-        });
+            const shouldWriteEnv = await promptConfirm(
+              rl,
+              'Create a .env file in the migrated copy now?',
+              {
+                defaultValue: false,
+              },
+            );
 
-        const remaining = convertReport.convert?.remainingBase44ModuleReferences?.length ?? 0;
-        if (remaining > 0) {
-          console.log('');
-          console.log(
-            `Heads up: ${remaining} file(s) still reference Base44 modules (see report TODOs).`,
-          );
-        }
+            if (shouldWriteEnv) {
+              const inferred = report.inferred.envVars ?? [];
+              const required = new Set<string>(inferred);
+              required.add('SUPABASE_URL');
+              required.add('SUPABASE_ANON_KEY');
+              if (backendMode === 'local') {
+                required.add('SUPABASE_LOCAL_URL');
+                required.add('SUPABASE_LOCAL_ANON_KEY');
+              }
 
-        if (shouldInit) {
-          console.log('');
-          console.log('Initializing Supabase assets...');
-          await runInitSupabase(chosenOut, {
-            ownerColumn,
-            includeUpdatedAt,
-            generateEdgeFunctions,
-            functionsDir,
+              const defaults: Record<string, string> = {};
+              if (backendMode === 'local') {
+                defaults.SUPABASE_LOCAL_URL = 'http://127.0.0.1:54321';
+                defaults.SUPABASE_URL = 'http://127.0.0.1:54321';
+              }
+
+              const values = await promptEnvVars(rl, [...required].sort(), defaults);
+              await writeDotEnvFile(chosenOut, values);
+              console.log('Wrote .env');
+            }
+
+            console.log('');
+            const ownerColumnRaw = await promptInput(
+              rl,
+              'Optional owner column for RLS templates (leave blank for none)',
+              { defaultValue: '' },
+            );
+            const ownerColumn = ownerColumnRaw.trim() ? ownerColumnRaw.trim() : null;
+            const includeUpdatedAt = await promptConfirm(
+              rl,
+              'Include updated_at columns in generated tables?',
+              {
+                defaultValue: false,
+              },
+            );
+
+            const hasServerFunctions = (report.inferred.serverFunctions?.length ?? 0) > 0;
+            const generateEdgeFunctions = hasServerFunctions
+              ? await promptConfirm(
+                  rl,
+                  `Generate Supabase Edge Function stubs for inferred server functions (${report.inferred.serverFunctions.length})?`,
+                  { defaultValue: true },
+                )
+              : false;
+            const functionsDir = generateEdgeFunctions
+              ? await promptInput(rl, 'Edge functions output dir', {
+                  defaultValue: 'supabase/functions',
+                })
+              : undefined;
+
+            const shouldInit = await promptConfirm(
+              rl,
+              'Generate Supabase SQL (migrations + RLS templates) now?',
+              {
+                defaultValue: true,
+              },
+            );
+
+            console.log('');
+            console.log('Converting...');
+            await runConvert(chosenOut, {
+              backendMode,
+              backendEntryPath,
+              envExamplePath,
+            });
+
+            console.log('');
+            const verifyAfterConvert = await runVerify(chosenOut);
+            printVerifyResult(verifyAfterConvert);
+            if (!verifyAfterConvert.ok) process.exitCode = 1;
+
+            if (shouldInit) {
+              console.log('');
+              console.log('Initializing Supabase assets...');
+              await runInitSupabase(chosenOut, {
+                ownerColumn,
+                includeUpdatedAt,
+                generateEdgeFunctions,
+                functionsDir,
+              });
+            }
+
+            const shouldCleanup = await promptConfirm(
+              rl,
+              'Delete obvious Base44-only artifacts in the migrated copy (cleanup)?',
+              { defaultValue: false },
+            );
+            if (shouldCleanup) {
+              const aggressiveCleanup = await promptConfirm(
+                rl,
+                'Aggressive cleanup: quarantine any remaining Base44-referencing files (recommended for a Base44-free tree)?',
+                { defaultValue: false },
+              );
+              const shouldRemoveDeps = await promptConfirm(
+                rl,
+                'Also remove Base44 dependencies from package.json (only if verify passes)?',
+                { defaultValue: true },
+              );
+              console.log('');
+              console.log('Cleaning up Base44 artifacts...');
+              const { result } = await runCleanup(chosenOut, {
+                mode: 'delete',
+                aggressive: aggressiveCleanup,
+                quarantineDir: '.base44-to-supabase/removed',
+                removeDependencies: shouldRemoveDeps,
+              });
+              console.log(`Deleted: ${result.deletedPaths.length} path(s)`);
+              if (result.quarantinedPaths.length)
+                console.log(`Quarantined: ${result.quarantinedPaths.length} path(s)`);
+              if (result.skippedPaths.length)
+                console.log(`Skipped: ${result.skippedPaths.length} path(s) (still referenced)`);
+              if (result.removedDependencies.length) {
+                console.log(`Removed dependencies: ${result.removedDependencies.join(', ')}`);
+                console.log(
+                  'Note: run your package manager install in the project to update lockfiles.',
+                );
+              }
+
+              console.log('');
+              const verifyAfterCleanup = await runVerify(chosenOut);
+              printVerifyResult(verifyAfterCleanup);
+              if (!verifyAfterCleanup.ok) process.exitCode = 1;
+            }
+
+            console.log('');
+            console.log(`Done. Migrated copy at: ${chosenOut}`);
+            console.log('');
+            printSupabaseNextSteps(chosenOut);
+
+            return chosenOut;
           });
-        }
-
-        const shouldCleanup = await promptConfirm(
-          rl,
-          'Delete obvious Base44-only artifacts in the migrated copy (conservative cleanup)?',
-          { defaultValue: false },
-        );
-        if (shouldCleanup) {
-          console.log('');
-          console.log('Cleaning up Base44 artifacts...');
-          const { result } = await runCleanup(chosenOut, { mode: 'delete' });
-          console.log(`Deleted: ${result.deletedPaths.length} path(s)`);
-          if (result.skippedPaths.length) {
-            console.log(`Skipped: ${result.skippedPaths.length} path(s) (still referenced)`);
-          }
-        }
-
-        console.log('');
-        console.log(`Done. Migrated copy at: ${chosenOut}`);
-        console.log('');
-        printSupabaseNextSteps(chosenOut);
-
-        return chosenOut;
-      });
 
       void outAbs;
     });

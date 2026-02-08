@@ -1,8 +1,17 @@
 {
   "name": "base44-to-supabase",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "description": "Migration and portability tooling to help Base44-based apps adopt Supabase (cloud or local) via a vendor-neutral adapter layer.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ItzDusty/base44-to-supabase.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ItzDusty/base44-to-supabase/issues"
+  },
+  "homepage": "https://github.com/ItzDusty/base44-to-supabase#readme",
   "packageManager": "pnpm@9.15.4",
   "type": "module",
   "engines": {
@@ -13,7 +22,8 @@
     "lint": "eslint .",
     "format": "prettier . --check",
     "format:write": "prettier . --write",
-    "test": "vitest run"
+    "test": "vitest run",
+    "version:check": "node -e \"const fs=require('node:fs'); const pkgs=['packages/adapter/package.json','packages/adapter-supabase/package.json','packages/adapter-local/package.json','packages/codemods/package.json','packages/cli/package.json'].map(p=>JSON.parse(fs.readFileSync(p,'utf8')).version); const uniq=[...new Set(pkgs)]; if(uniq.length!==1) { console.error('Package versions differ:', pkgs); process.exit(1); } console.log('All package versions:', uniq[0]);\""
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

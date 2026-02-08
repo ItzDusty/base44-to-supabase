@@ -7,3 +7,4 @@ dist/
 pnpm-lock.yaml
 coverage/
 .vscode/
+.packs/

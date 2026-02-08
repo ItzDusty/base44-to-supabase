@@ -1,6 +1,22 @@
 {
   "name": "@base44-to-supabase/codemods",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "Codemods and analysis used by the base44-to-supabase CLI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ItzDusty/base44-to-supabase.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ItzDusty/base44-to-supabase/issues"
+  },
+  "homepage": "https://github.com/ItzDusty/base44-to-supabase#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,6 +31,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {

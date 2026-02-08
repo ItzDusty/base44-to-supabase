@@ -13,6 +13,7 @@ const DEFAULT_PATTERNS = [
   '!**/.next/**',
   '!**/.turbo/**',
   '!**/.git/**',
+  '!**/.base44-to-supabase/**',
 ];
 
 export async function findProjectSourceFiles(options: ScanOptions): Promise<string[]> {

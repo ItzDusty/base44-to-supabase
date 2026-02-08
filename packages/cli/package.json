@@ -1,6 +1,22 @@
 {
   "name": "@base44-to-supabase/cli",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "CLI to migrate Base44-based apps to Supabase via a vendor-neutral adapter.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ItzDusty/base44-to-supabase.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ItzDusty/base44-to-supabase/issues"
+  },
+  "homepage": "https://github.com/ItzDusty/base44-to-supabase#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "bin": {
     "base44-to-supabase": "./dist/index.js"
@@ -11,10 +27,11 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@base44-to-supabase/codemods": "workspace:*",
+    "@base44-to-supabase/codemods": "0.1.0-alpha.0",
     "commander": "^12.1.0"
   },
   "devDependencies": {

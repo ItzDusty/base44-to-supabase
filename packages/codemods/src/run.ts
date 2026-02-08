@@ -24,6 +24,10 @@ export type RunInitSupabaseOptions = {
 
 export type RunCleanupOptions = {
   mode?: 'dry-run' | 'delete';
+  removeDependencies?: boolean;
+  removeBase44FunctionsDir?: boolean;
+  aggressive?: boolean;
+  quarantineDir?: string;
 };
 
 export async function runAnalyze(
@@ -83,7 +87,12 @@ export async function runCleanup(
 ): Promise<{
   report: Base44ToSupabaseReport;
   reportPath: string;
-  result: { deletedPaths: string[]; skippedPaths: Array<{ path: string; reason: string }> };
+  result: {
+    deletedPaths: string[];
+    quarantinedPaths: string[];
+    skippedPaths: Array<{ path: string; reason: string }>;
+    removedDependencies: string[];
+  };
 }> {
   const abs = path.resolve(rootPath);
   const existing = (await readReport(abs)) ?? (await analyzeProject({ rootPath: abs }));
@@ -91,6 +100,10 @@ export async function runCleanup(
     rootPath: abs,
     report: existing,
     mode: options?.mode ?? 'dry-run',
+    removeDependencies: options?.removeDependencies ?? false,
+    removeBase44FunctionsDir: options?.removeBase44FunctionsDir ?? true,
+    aggressive: options?.aggressive ?? false,
+    quarantineDir: options?.quarantineDir,
   });
   const reportPath = await writeReport(abs, updated);
   return { report: updated, reportPath, result };

@@ -2,6 +2,8 @@
 
 Thanks for helping improve `base44-to-supabase`.
 
+By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Goals
 
 - Keep the project neutral and technical.

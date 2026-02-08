@@ -12,7 +12,19 @@ Prerequisites:
 - Git
 - pnpm (recommended via Corepack)
 
-Install and build:
+Install (published):
+
+```bash
+npx -y @base44-to-supabase/cli start <path-or-git-url>
+```
+
+Or with pnpm:
+
+```bash
+pnpm dlx @base44-to-supabase/cli start <path-or-git-url>
+```
+
+Install and build (from source):
 
 ```bash
 git clone https://github.com/ItzDusty/base44-to-supabase.git
@@ -34,6 +46,12 @@ Then verify you’re fully off Base44:
 
 ```bash
 node packages/cli/dist/index.js verify <migrated-project-path>
+```
+
+Run in CI / non-interactive mode:
+
+```bash
+node packages/cli/dist/index.js start <path-or-git-url> --ci --out <migrated-project-path>
 ```
 
 ## What this does
@@ -80,6 +98,7 @@ node packages/cli/dist/index.js analyze <path>
 node packages/cli/dist/index.js convert <path> --backend-mode supabase --backend-entry src/backend/index.ts --env-example .env.example
 node packages/cli/dist/index.js init-supabase <path>
 node packages/cli/dist/index.js verify <path>
+node packages/cli/dist/index.js cleanup <path> --delete
 ```
 
 Each command writes `base44-to-supabase.report.json` to the target project.
@@ -93,6 +112,40 @@ node packages/cli/dist/index.js verify <path>
 ```
 
 It exits with a non-zero code if any `import ... from 'base44'`, `require('base44')`, or `import('base44')`-style references remain.
+
+## CI / non-interactive start
+
+Use `start --ci` when you want a deterministic flow with no prompts.
+
+Key behavior:
+
+- Prints `PASS`/`FAIL` after `convert` and again at the end.
+- Sets a non-zero exit code if verify fails.
+
+Example (cloud Supabase + cleanup + env write):
+
+```bash
+node packages/cli/dist/index.js start <path-or-git-url> --ci --out <migrated-project-path> --backend-mode supabase --write-env --env SUPABASE_URL=https://xyzcompany.supabase.co --env SUPABASE_ANON_KEY=your_anon_key --cleanup --aggressive-cleanup --remove-deps
+```
+
+Notes:
+
+- `--write-env` in CI requires at least one `--env KEY=VALUE`.
+- `--aggressive-cleanup` quarantines remaining Base44-referencing source files (see below).
+
+## Cleanup
+
+Cleanup is optional and opt-in.
+
+- `cleanup <path>` defaults to a dry-run; add `--delete` to apply changes.
+- `--remove-deps` removes Base44-related dependencies from `package.json` only if `verify` passes (to avoid breaking builds).
+- `--aggressive` quarantines any remaining Base44-referencing source files into `.base44-to-supabase/removed/`.
+
+Example:
+
+```bash
+node packages/cli/dist/index.js cleanup <path> --delete --aggressive --remove-deps
+```
 
 ## Auth and authorization (customer guide)
 

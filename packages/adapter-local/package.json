@@ -1,6 +1,22 @@
 {
   "name": "@base44-to-supabase/adapter-local",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "Local Supabase convenience wrapper for the @base44-to-supabase adapter.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ItzDusty/base44-to-supabase.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ItzDusty/base44-to-supabase/issues"
+  },
+  "homepage": "https://github.com/ItzDusty/base44-to-supabase#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,11 +30,12 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@base44-to-supabase/adapter": "workspace:*",
-    "@base44-to-supabase/adapter-supabase": "workspace:*"
+    "@base44-to-supabase/adapter": "0.1.0-alpha.0",
+    "@base44-to-supabase/adapter-supabase": "0.1.0-alpha.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.10",

@@ -17,6 +17,12 @@ async function makeTempProject(): Promise<string> {
     ].join('\n'),
     'utf8',
   );
+  await fs.mkdir(path.join(dir, '.base44-to-supabase', 'removed'), { recursive: true });
+  await fs.writeFile(
+    path.join(dir, '.base44-to-supabase', 'removed', 'quarantined.ts'),
+    "import { auth } from 'base44';\nexport const x = auth;\n",
+    'utf8',
+  );
   return dir;
 }
 
