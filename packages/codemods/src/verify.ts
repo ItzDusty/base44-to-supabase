@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { findProjectSourceFiles, toPosixPath } from './fs.js';
+import { findImportedModuleSpecifiers } from './importScan.js';
 import { DEFAULT_BASE44_IMPORT_SOURCES, isLikelyBase44ImportSource } from './sdkHeuristics.js';
 
 export type VerifyOptions = {
@@ -22,23 +23,6 @@ export type VerifyResult = {
 
 function rel(rootPath: string, abs: string): string {
   return toPosixPath(path.relative(rootPath, abs));
-}
-
-function findImportedModuleSpecifiers(text: string): string[] {
-  const out: string[] = [];
-
-  // import ... from 'x'
-  // require('x')
-  // import('x')
-  const re =
-    /(from\s+['"]([^'"]+)['"])|(require\s*\(\s*['"]([^'"]+)['"]\s*\))|(import\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const spec = m[2] ?? m[4] ?? m[6];
-    if (spec) out.push(spec);
-  }
-
-  return [...new Set(out)];
 }
 
 export async function verifyProject(options: VerifyOptions): Promise<VerifyResult> {

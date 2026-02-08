@@ -72,9 +72,7 @@ export async function runInitSupabase(
   return { report: updated, reportPath };
 }
 
-export async function runVerify(
-  rootPath: string,
-): Promise<{
+export async function runVerify(rootPath: string): Promise<{
   ok: boolean;
   filesScanned: number;
   remaining: Array<{ file: string; specifiers: string[] }>;

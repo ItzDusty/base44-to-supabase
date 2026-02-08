@@ -12,6 +12,65 @@ This project is designed to be neutral and practical: Base44 can be a productive
 
 After `convert`, the tool also flags any remaining Base44 module references (including `require('...')` / `import('...')`) as TODOs in the report.
 
+## Auth and authorization (customer guide)
+
+This tool helps you **remove Base44 SDK usage** and route calls through a Supabase-backed adapter (`backend.*`). It does **not** fully build your application’s login UI or authorization model for you.
+
+What you get automatically:
+
+- Code rewrites for common auth calls to `backend.auth.*`.
+- A generated adapter entry that reads Supabase env vars.
+- Supabase SQL scaffolding (migrations + safe-by-default RLS policy templates) when you run `init-supabase`.
+
+What you still need to do (usually quick, but app-specific):
+
+- Build or wire up your **login UI** (email/password and/or OAuth).
+- Configure Supabase **Auth providers** and **redirect URLs**.
+- Decide your authorization strategy and finalize **Row Level Security (RLS)** policies.
+
+### Step 1: enable Supabase Auth
+
+In your Supabase project dashboard:
+
+- Enable the sign-in methods you want (email/password, Google, GitHub, etc.).
+- Set redirect URLs for your local and production environments.
+
+Your app code is responsible for when/where users sign in, and how you protect routes.
+
+### Step 2: add a login flow in your app
+
+The adapter exposes a minimal surface:
+
+- `backend.auth.signIn(...)`
+- `backend.auth.signOut()`
+- `backend.auth.getUser()`
+
+Example (pseudo-UI code):
+
+```ts
+await backend.auth.signIn({ email, password });
+const user = await backend.auth.getUser();
+if (!user) throw new Error('Not signed in');
+```
+
+### Step 3: implement authorization with RLS (recommended)
+
+Supabase authorization is typically enforced with **RLS policies**.
+
+- Run `init-supabase` to generate migrations + policy templates.
+- Choose an owner column (for example `owner_id`) when generating templates.
+- Treat the generated policies as a starting point—review and adjust to match your product.
+
+If you need server-only administrative operations, do them in server-side code (or Edge Functions) using a service-role key. Do not ship service-role keys to the browser.
+
+### Customer checklist (common path)
+
+- Run `start` to create a migrated working copy.
+- Run `verify` to confirm there are no remaining Base44 module references.
+- Configure Supabase Auth providers + redirect URLs.
+- Implement login + route protection in your UI.
+- Review and finalize RLS policies before enabling them.
+
 ## What this does NOT do
 
 - It does **not** guarantee a fully automated migration.
@@ -37,6 +96,12 @@ pnpm install
 pnpm -r build
 ```
 
+Run the CLI (from source):
+
+```bash
+node packages/cli/dist/index.js --help
+```
+
 Run the interactive flow (recommended):
 
 ```bash
@@ -51,6 +116,7 @@ Advanced (non-interactive) commands:
 node packages/cli/dist/index.js analyze <path>
 node packages/cli/dist/index.js convert <path> --backend-mode supabase --backend-entry src/backend/index.ts --env-example .env.example
 node packages/cli/dist/index.js init-supabase <path>
+node packages/cli/dist/index.js verify <path>
 ```
 
 Each command writes `base44-to-supabase.report.json` to the target project.
@@ -61,10 +127,22 @@ Each command writes `base44-to-supabase.report.json` to the target project.
 2. Internally it runs `analyze` to identify Base44 SDK imports and usage categories.
 3. It runs `convert` to remove Base44 imports, add a generated backend entry (default `src/backend/index.ts`), create `.env.example`, and rewrite common Base44 auth/CRUD/storage calls to `backend.*`.
 4. Optionally it runs `init-supabase` to generate `supabase/migrations/*.sql` and safe-by-default RLS policy templates. If server-function-like calls are inferred, it can generate Edge Function stub folders under `supabase/functions/`.
-5. Manually:
+5. Run `verify` (recommended for CI) to ensure there are no remaining Base44 module references.
+6. Manually:
    - Adjust the adapter entry (`src/backend/index.ts`) for your environment (cloud vs local).
    - Refine SQL column types and add indexes/constraints.
-   - Write RLS policies that match your product requirements.
+
+- Finish login/route protection in your UI and write RLS policies that match your product requirements.
+
+## Verification
+
+If you want a hard “are we fully off Base44?” check (useful in CI), run:
+
+```bash
+node packages/cli/dist/index.js verify <path>
+```
+
+It exits with a non-zero code if any `import ... from 'base44'`, `require('base44')`, or `import('base44')`-style references remain.
 
 ## Supabase local vs cloud
 

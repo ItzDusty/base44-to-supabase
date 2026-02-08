@@ -10,6 +10,7 @@ import {
 } from 'ts-morph';
 
 import { findProjectSourceFiles, toPosixPath } from './fs.js';
+import { findImportedModuleSpecifiers } from './importScan.js';
 import { isLikelyBase44ImportSource } from './sdkHeuristics.js';
 import type { Base44ToSupabaseReport, ConversionTodo, UsageCategory } from './report.js';
 
@@ -347,23 +348,6 @@ function ensureBackendImport(sf: SourceFile, moduleSpecifier: string) {
   }
 
   sf.insertStatements(insertIndex, `import { backend } from ${JSON.stringify(moduleSpecifier)};`);
-}
-
-function findImportedModuleSpecifiers(text: string): string[] {
-  const out: string[] = [];
-
-  // import ... from 'x'
-  // require('x')
-  // import('x')
-  const re =
-    /(from\s+['"]([^'"]+)['"])|(require\s*\(\s*['"]([^'"]+)['"]\s*\))|(import\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const spec = m[2] ?? m[4] ?? m[6];
-    if (spec) out.push(spec);
-  }
-
-  return [...new Set(out)];
 }
 
 export async function convertProject(options: ConvertOptions): Promise<Base44ToSupabaseReport> {
