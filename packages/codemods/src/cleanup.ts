@@ -23,6 +23,11 @@ function rel(rootPath: string, abs: string): string {
   return toPosixPath(path.relative(rootPath, abs));
 }
 
+function key(absPath: string): string {
+  const resolved = path.resolve(absPath);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 async function exists(p: string): Promise<boolean> {
   try {
     await fs.stat(p);
@@ -70,9 +75,10 @@ async function buildImportReverseIndex(rootPath: string): Promise<Map<string, Se
     for (const spec of relatives) {
       const resolved = await resolveRelativeImport(fromAbs, spec);
       if (!resolved) continue;
-      const set = importedBy.get(resolved) ?? new Set<string>();
+      const k = key(resolved);
+      const set = importedBy.get(k) ?? new Set<string>();
       set.add(fromAbs);
-      importedBy.set(resolved, set);
+      importedBy.set(k, set);
     }
   }
 
@@ -155,7 +161,7 @@ export async function cleanupProject(options: CleanupOptions): Promise<{
     const text = await fs.readFile(abs, 'utf8');
     if (!isBase44OnlyFile(text)) continue;
 
-    const importers = importedBy.get(abs);
+    const importers = importedBy.get(key(abs));
     if (importers && importers.size > 0) {
       const sample = [...importers].slice(0, 3).map((p) => rel(options.rootPath, p));
       skippedPaths.push({
